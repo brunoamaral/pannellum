@@ -1,6 +1,6 @@
 /*
  * libpannellum - A WebGL and CSS 3D transform based Panorama Renderer
- * Copyright (c) 2012-2018 Matthew Petroff
+ * Copyright (c) 2012-2019 Matthew Petroff
  * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -266,9 +266,9 @@ function Renderer(container) {
                 faceImg.onload = onLoad;
                 faceImg.onerror = incLoaded; // ignore missing face to support partial fallback image
                 if (imageType == 'multires') {
-                    faceImg.src = encodeURI(path.replace('%s', sides[s]) + '.' + image.extension);
+                    faceImg.src = path.replace('%s', sides[s]) + '.' + image.extension;
                 } else {
-                    faceImg.src = encodeURI(image[s].src);
+                    faceImg.src = image[s].src;
                 }
             }
             fillMissingFaces(fallbackImgSize);
@@ -304,9 +304,9 @@ function Renderer(container) {
             }
         } else if (imageType == 'cubemap') {
             if (cubeImgWidth > gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE)) {
-                console.log('Error: The image is too big; it\'s ' + width + 'px wide, '+
+                console.log('Error: The image is too big; it\'s ' + cubeImgWidth + 'px wide, ' +
                             'but this device\'s maximum supported size is ' + maxWidth + 'px.');
-                throw {type: 'webgl size error', width: width, maxWidth: maxWidth};
+                throw {type: 'webgl size error', width: cubeImgWidth, maxWidth: maxWidth};
             }
         }
 
@@ -320,6 +320,15 @@ function Renderer(container) {
 
         // Create viewport for entire canvas
         gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+        // Check precision support
+        if (gl.getShaderPrecisionFormat) {
+            var precision = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+            if (precision && precision.precision < 1) {
+                // `highp` precision not supported; https://stackoverflow.com/a/33308927
+                fragEquiCubeBase = fragEquiCubeBase.replace('highp', 'mediump');
+            }
+        }
 
         // Create vertex shader
         vs = gl.createShader(gl.VERTEX_SHADER);
@@ -426,7 +435,7 @@ function Renderer(container) {
 
                     // Draw image on canvas
                     var cropCanvas = document.createElement('canvas');
-                    cropCanvas.width = image.width;
+                    cropCanvas.width = image.width / 2;
                     cropCanvas.height = image.height;
                     var cropContext = cropCanvas.getContext('2d');
                     cropContext.drawImage(image, 0, 0);
@@ -442,7 +451,8 @@ function Renderer(container) {
                     gl.uniform1i(gl.getUniformLocation(program, 'u_image1'), 1);
 
                     // Upload second half of image to the texture
-                    cropImage = cropContext.getImageData(image.width / 2, 0, image.width / 2, image.height);
+                    cropContext.drawImage(image, -image.width / 2, 0);
+                    cropImage = cropContext.getImageData(0, 0, image.width / 2, image.height);
                     gl.texImage2D(glBindType, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, cropImage);
 
                     // Set parameters for rendering any size
@@ -451,7 +461,7 @@ function Renderer(container) {
                     gl.texParameteri(glBindType, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                     gl.texParameteri(glBindType, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-                    // Reactive first texture unit
+                    // Reactivate first texture unit
                     gl.activeTexture(gl.TEXTURE0);
                 }
             }
@@ -686,9 +696,9 @@ function Renderer(container) {
                 program.nodeCache.length > program.currentNodes.length + 50) {
                 // Remove older nodes from cache
                 var removed = program.nodeCache.splice(200, program.nodeCache.length - 200);
-                for (var i = 0; i < removed.length; i++) {
+                for (var j = 0; j < removed.length; j++) {
                     // Explicitly delete textures
-                    gl.deleteTexture(removed[i].texture);
+                    gl.deleteTexture(removed[j].texture);
                 }
             }
             program.currentNodes = [];
@@ -1144,7 +1154,7 @@ function Renderer(container) {
             });
             this.image.addEventListener('load', loadFn);
             this.image.addEventListener('error', loadFn); // ignore missing tile file to support partial image, otherwise retry loop causes high CPU load
-        };
+        }
 
         TextureImageLoader.prototype.loadTexture = function(src, texture, callback) {
             this.texture = texture;
@@ -1157,7 +1167,7 @@ function Renderer(container) {
             this.src = src;
             this.texture = texture;
             this.callback = callback;
-        };
+        }
 
         function releaseTextureImageLoader(til) {
             if (pendingTextureRequests.length) {
@@ -1187,7 +1197,7 @@ function Renderer(container) {
      * @param {MultiresNode} node - Input node.
      */
     function processNextTile(node) {
-        loadTexture(node, encodeURI(node.path + '.' + image.extension), function(texture, loaded) {
+        loadTexture(node, node.path + '.' + image.extension, function(texture, loaded) {
             node.texture = texture;
             node.textureLoaded = loaded ? 2 : 1;
         }, globalParams.crossOrigin);
@@ -1344,7 +1354,7 @@ var vMulti = [
 
 // Fragment shader
 var fragEquiCubeBase = [
-'precision mediump float;',
+'precision highp float;', // mediump looks bad on some mobile devices
 
 'uniform float u_aspectRatio;',
 'uniform float u_psi;',
